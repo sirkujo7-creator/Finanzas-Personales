@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 
-const VERSION = '3.0.1 (fase 3)';
+const VERSION = '4.0.0 (fase 4: Drive)';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const pad2 = n => String(n).padStart(2, '0');
@@ -60,7 +60,10 @@ const Store = {
 
 const blank = () => ({ v: 2, accounts: [], txs: [], recurring: [], budgets: {}, lessons: [], debts: [], goals: [], settings: { ipc: 6.24, ipcDate: 'agosto 2026, DANE', usura: null, lock: null, fails: 0, lockUntil: 0, lastBackup: null, lastAcc: null } });
 let S = null;
-const save = () => Store.set('state', S).catch(() => toast('No se pudo guardar. Revisa el espacio del celular.'));
+const save = () => {
+  if (typeof D !== 'undefined' && D.connected) { D.dirty = true; driveSave(); scheduleDrive(); }
+  return Store.set('state', S).catch(() => toast('No se pudo guardar. Revisa el espacio del celular.'));
+};
 
 /* ---------- Cálculos ---------- */
 const accById = id => S.accounts.find(a => a.id === id);
@@ -436,6 +439,8 @@ function enterApp(to) {
   const n = runRecurring();
   if (n) { save(); toast(`${n} movimiento${n > 1 ? 's' : ''} fijo${n > 1 ? 's' : ''} registrado${n > 1 ? 's' : ''}`); }
   go(to || tab);
+  if (driveResume) setTimeout(runDriveResume, 350);
+  else if (D.connected && D.dirty) scheduleDrive();
 }
 function go(t) {
   tab = t; $('#title').textContent = TITLES[t];
@@ -466,8 +471,11 @@ function renderInicio() {
   let notices = '';
   const lb = S.settings.lastBackup;
   const daysSince = lb ? Math.floor((Date.now() - parseISO(lb)) / 864e5) : null;
-  if (S.txs.length >= 5 && (lb === null || daysSince >= 7))
-    notices += `<div class="notice"><span>${lb ? `Tu último respaldo fue hace ${daysSince} días.` : 'Aún no tienes un respaldo de tus datos.'}</span><button class="btn sm" id="bk">Respaldar</button></div>`;
+  const driveAge = D.last ? (Date.now() - new Date(D.last)) / 864e5 : null;
+  if (D.connected && D.dirty && !driveOk() && (driveAge === null || driveAge >= 1))
+    notices += `<div class="notice"><span>Tienes cambios sin respaldar en Drive. Google pide confirmar tu sesión.</span><button class="btn sm" id="bk">Respaldar</button></div>`;
+  else if (!D.connected && S.txs.length >= 5 && (lb === null || daysSince >= 7))
+    notices += `<div class="notice"><span>${lb ? `Tu último respaldo fue hace ${daysSince} días.` : 'Aún no tienes un respaldo de tus datos.'} Conecta Google Drive para que se haga solo.</span><button class="btn sm" id="bk">Conectar</button></div>`;
 
   const heroText = avail >= 0
     ? `<p>Tienes ${money(avail)} para los ${daysLeft} ${daysLeft === 1 ? 'día' : 'días'} que quedan del mes, después de apartar ${money(pendExp)} de pagos fijos${reserved ? ` y ${money(reserved)} para tus metas` : ''}.</p>`
@@ -511,7 +519,7 @@ function renderInicio() {
       <div class="row"><span>Deuda en tarjetas</span><span class="amt ${debt > 0 ? 'neg' : ''}">${money(debt)}</span></div>
       <div class="row"><span class="strong">Patrimonio neto</span><span class="amt strong">${money(net)}</span></div>
     </section>`;
-  if ($('#bk')) $('#bk').onclick = exportData;
+  if ($('#bk')) $('#bk').onclick = () => D.connected ? driveBackup(false) : driveAuth('connect');
   if ($('#moreAl')) $('#moreAl').onclick = () => go('plan');
 }
 
@@ -1267,9 +1275,17 @@ function renderAjustes() {
   const lb = S.settings.lastBackup;
   $('#view').innerHTML = `
     <section class="block">
-      <h2>Respaldo</h2>
-      <p class="small muted" style="margin:0 0 12px">Tus datos viven solo en este celular. Guarda un respaldo en Google Drive con el menú de compartir. ${lb ? `Último respaldo: ${dayLabel(lb).toLowerCase()}.` : 'Aún no has hecho ninguno.'}</p>
-      <div class="actions"><button class="btn" id="exp">Respaldar ahora</button><button class="btn ghost" id="imp">Restaurar</button></div>
+      <h2>Respaldo en Google Drive</h2>
+      ${D.connected ? `<p class="small muted" style="margin:0 0 12px">Conectado. Cada cambio se respalda solo en la carpeta "Finanzas Personales" de tu Drive, y se guarda una copia por mes. ${D.last ? `Último respaldo: ${new Date(D.last).toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.` : ''}${D.dirty ? ' Hay cambios pendientes.' : ''}${driveOk() ? '' : ' La sesión de Google venció: el próximo respaldo te pedirá confirmarla.'}</p>
+      <div class="actions"><button class="btn" id="dNow">Respaldar ahora</button><button class="btn ghost" id="dRes">Restaurar</button></div>
+      <button class="btn ghost wide" id="dOff" style="margin-top:10px">Desconectar Drive</button>`
+      : `<p class="small muted" style="margin:0 0 12px">Conecta tu cuenta de Google y tus datos se respaldarán solos. La app solo puede ver los archivos que ella misma crea, nunca el resto de tu Drive.</p>
+      <div class="actions"><button class="btn" id="dCon">Conectar Google Drive</button><button class="btn ghost" id="dRes">Restaurar desde Drive</button></div>`}
+    </section>
+    <section class="block">
+      <h2>Respaldo manual</h2>
+      <p class="small muted" style="margin:0 0 12px">Un archivo que guardas donde quieras. ${lb ? `Último respaldo: ${dayLabel(lb).toLowerCase()}.` : ''}</p>
+      <div class="actions"><button class="btn ghost" id="exp">Exportar archivo</button><button class="btn ghost" id="imp">Importar archivo</button></div>
     </section>
     <section class="block">
       <h2>Indicadores económicos</h2>
@@ -1292,6 +1308,10 @@ function renderAjustes() {
     </section>
     <p class="small muted">Finanzas Personales ${VERSION}</p>`;
   $('#exp').onclick = exportData;
+  if ($('#dCon')) $('#dCon').onclick = () => driveAuth('connect');
+  if ($('#dNow')) $('#dNow').onclick = () => driveBackup(false);
+  if ($('#dOff')) $('#dOff').onclick = driveDisconnect;
+  $('#dRes').onclick = driveRestoreSheet;
   $('#sEco').onclick = async () => {
     const i = parseFloat(($('#sIpc').value || '').replace(',', '.')), u = parseFloat(($('#sUsu').value || '').replace(',', '.'));
     if (!(i >= -5 && i < 100)) { toast('Revisa el valor de inflación.'); return; }
@@ -1311,7 +1331,7 @@ function renderAjustes() {
 
 async function exportData() {
   const name = `finanzas-respaldo-${todayISO()}.json`;
-  const data = JSON.stringify({ app: 'finanzas-personales', exportedAt: new Date().toISOString(), state: { ...S, settings: { ...S.settings, lock: null } } });
+  const data = backupJSON();
   const file = new File([data], name, { type: 'application/json' });
   const mark = async () => { S.settings.lastBackup = todayISO(); await save(); if (tab !== 'movs') refresh(); };
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -1325,20 +1345,152 @@ async function exportData() {
   await mark(); toast('Respaldo descargado');
 }
 
+async function restoreState(obj) {
+  const st = obj && (obj.state || obj);
+  if (!st || !Array.isArray(st.accounts) || !Array.isArray(st.txs)) { toast('Ese archivo no es un respaldo válido de la app.'); return; }
+  if (!confirm(`El respaldo tiene ${st.accounts.length} cuentas y ${st.txs.length} movimientos. Reemplazará lo que hay en este celular. ¿Restaurar?`)) return;
+  const lock = S.settings.lock;
+  S = { ...blank(), ...st, settings: { ...blank().settings, ...(st.settings || {}), lock, fails: 0, lockUntil: 0 } };
+  S.recurring = S.recurring || []; S.budgets = S.budgets || {}; S.lessons = S.lessons || []; S.debts = S.debts || []; S.goals = S.goals || [];
+  runRecurring(); await save(); closeSheet(); go('inicio'); toast('Datos restaurados');
+}
+
 $('#fileIn').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  try {
-    const obj = JSON.parse(await f.text());
-    const st = obj.state || obj;
-    if (!Array.isArray(st.accounts) || !Array.isArray(st.txs)) throw new Error('formato');
-    if (!confirm(`El respaldo tiene ${st.accounts.length} cuentas y ${st.txs.length} movimientos. Reemplazará lo que hay en este celular. ¿Restaurar?`)) return;
-    const lock = S.settings.lock;
-    S = { ...blank(), ...st, settings: { ...blank().settings, ...(st.settings || {}), lock, fails: 0, lockUntil: 0 } };
-    S.recurring = S.recurring || []; S.budgets = S.budgets || {}; S.lessons = S.lessons || []; S.debts = S.debts || []; S.goals = S.goals || [];
-    runRecurring(); await save(); go('inicio'); toast('Datos restaurados');
-  } catch (err) { toast('Ese archivo no es un respaldo válido de la app.'); }
+  try { await restoreState(JSON.parse(await f.text())); }
+  catch (err) { toast('Ese archivo no es un respaldo válido de la app.'); }
 });
+
+/* ---------- Google Drive: respaldo automático (fase 4a) ----------
+   Permiso drive.file: la app solo ve los archivos que ella misma crea. */
+const G_CLIENT = '1018549599126-2qabmmv1vrhuqis01e6met5pskn4h1dc.apps.googleusercontent.com';
+const G_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const G_REDIRECT = location.hostname.endsWith('github.io') ? 'https://sirkujo7-creator.github.io/finanzas-personales/' : location.origin + location.pathname;
+const G_API = 'https://www.googleapis.com/drive/v3/files';
+const G_UP = 'https://www.googleapis.com/upload/drive/v3/files';
+let D = { connected: false, token: null, exp: 0, folderId: null, fileId: null, monthly: {}, last: null, dirty: false, pending: null, pendingState: null };
+let driveResume = null, driveTimer = null, driveBusy = false;
+const driveSave = () => Store.set('drive', D).catch(() => {});
+const driveOk = () => !!D.token && Date.now() < D.exp - 60000;
+
+function driveAuth(action) {
+  D.pending = action; D.pendingState = uid() + uid();
+  driveSave().then(() => {
+    const p = new URLSearchParams({ client_id: G_CLIENT, redirect_uri: G_REDIRECT, response_type: 'token', scope: G_SCOPE, include_granted_scopes: 'true', state: D.pendingState });
+    location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + p;
+  });
+}
+
+function driveCatch() {
+  if (!/[#&](state|access_token|error)=/.test(location.hash)) return null;
+  const h = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!D.pendingState || h.get('state') !== D.pendingState) return { err: 'state' };
+  const action = D.pending; D.pending = null; D.pendingState = null;
+  if (h.get('error')) return { err: h.get('error'), action };
+  D.token = h.get('access_token'); D.exp = Date.now() + (+h.get('expires_in') || 3600) * 1000; D.connected = true;
+  return { action };
+}
+
+async function gapi(url, opts = {}) {
+  const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + D.token } });
+  if (r.status === 401) { D.token = null; await driveSave(); const e = new Error('auth'); e.status = 401; throw e; }
+  if (!r.ok) { const e = new Error('http'); e.status = r.status; throw e; }
+  return r;
+}
+
+async function ensureFolder() {
+  if (D.folderId) {
+    try { const j = await (await gapi(`${G_API}/${D.folderId}?fields=id,trashed`)).json(); if (!j.trashed) return D.folderId; }
+    catch (e) { if (e.status === 401) throw e; }
+  }
+  const q = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and name='Finanzas Personales' and trashed=false");
+  const j = await (await gapi(`${G_API}?q=${q}&fields=files(id)`)).json();
+  if (j.files && j.files[0]) D.folderId = j.files[0].id;
+  else D.folderId = (await (await gapi(`${G_API}?fields=id`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Finanzas Personales', mimeType: 'application/vnd.google-apps.folder' }) })).json()).id;
+  await driveSave(); return D.folderId;
+}
+
+async function upsert(name, content, id) {
+  const b = 'fp' + uid();
+  const meta = id ? { name } : { name, parents: [D.folderId], mimeType: 'application/json' };
+  const body = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${content}\r\n--${b}--`;
+  const send = fid => gapi(fid ? `${G_UP}/${fid}?uploadType=multipart&fields=id` : `${G_UP}?uploadType=multipart&fields=id`,
+    { method: fid ? 'PATCH' : 'POST', headers: { 'Content-Type': `multipart/related; boundary=${b}` }, body });
+  try { return (await (await send(id)).json()).id; }
+  catch (e) { if (id && e.status === 404) return (await (await send(null)).json()).id; throw e; }
+}
+
+function backupJSON() {
+  return JSON.stringify({ app: 'finanzas-personales', version: VERSION, exportedAt: new Date().toISOString(), state: { ...S, settings: { ...S.settings, lock: null, fails: 0, lockUntil: 0 } } });
+}
+
+async function driveBackup(quiet) {
+  if (!driveOk()) { if (!quiet) driveAuth('backup'); return false; }
+  if (!S.accounts.length && !S.txs.length) { if (!quiet) toast('No hay datos para respaldar. Si quieres recuperar tus datos, usa Restaurar.'); return false; }
+  if (driveBusy) return false; driveBusy = true;
+  try {
+    await ensureFolder();
+    const content = backupJSON(), mk = todayISO().slice(0, 7);
+    D.fileId = await upsert('respaldo-actual.json', content, D.fileId);
+    D.monthly = D.monthly || {};
+    D.monthly[mk] = await upsert(`respaldo-${mk}.json`, content, D.monthly[mk]);
+    D.last = new Date().toISOString(); D.dirty = false; await driveSave();
+    S.settings.lastBackup = todayISO(); await Store.set('state', S);
+    if (!quiet) toast('Respaldado en Google Drive');
+    if (tab === 'ajustes' || tab === 'inicio') refresh();
+    return true;
+  } catch (e) {
+    if (e.status === 401) { if (!quiet) driveAuth('backup'); }
+    else if (!quiet) toast('No se pudo respaldar en Drive. Revisa tu conexión.');
+    return false;
+  } finally { driveBusy = false; }
+}
+
+function scheduleDrive() {
+  clearTimeout(driveTimer);
+  if (driveOk()) driveTimer = setTimeout(() => driveBackup(true), 4000);
+}
+
+async function driveRestoreSheet() {
+  if (!driveOk()) { driveAuth('restore'); return; }
+  openSheet('<h2>Restaurar desde Drive</h2><p class="hint">Buscando tus respaldos…</p>');
+  try {
+    await ensureFolder();
+    const q = encodeURIComponent(`'${D.folderId}' in parents and trashed=false`);
+    const files = ((await (await gapi(`${G_API}?q=${q}&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime)`)).json()).files || []);
+    const when = t => new Date(t).toLocaleString('es-CO', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    openSheet(`<h2>Restaurar desde Drive</h2>
+      ${files.length ? `<p class="hint">"Respaldo actual" es el más reciente. Los mensuales guardan cómo estaban tus datos en cada mes.</p>
+      ${files.map(f => `<button class="tx" data-f="${esc(f.id)}"><span><span class="t">${f.name === 'respaldo-actual.json' ? 'Respaldo actual' : 'Respaldo de ' + esc(f.name.replace(/^respaldo-|\.json$/g, ''))}</span><span class="s">Guardado el ${when(f.modifiedTime)}</span></span></button>`).join('')}`
+      : '<p class="hint">No hay respaldos de esta app en tu Drive todavía.</p>'}
+      <div class="actions" style="margin-top:12px"><button class="btn ghost" id="cancel">Cerrar</button></div>`);
+    $('#cancel').onclick = closeSheet;
+    $$('[data-f]').forEach(el => el.onclick = async () => {
+      try { await restoreState(await (await gapi(`${G_API}/${el.dataset.f}?alt=media`)).json()); }
+      catch (e) { toast(e.status === 401 ? 'La sesión de Google venció. Intenta de nuevo.' : 'No se pudo leer ese respaldo.'); }
+    });
+  } catch (e) {
+    if (e.status === 401) driveAuth('restore'); else { closeSheet(); toast('No se pudo conectar con Drive. Revisa tu conexión.'); }
+  }
+}
+
+async function driveDisconnect() {
+  if (!confirm('¿Desconectar Google Drive? Tus respaldos siguen en Drive; solo dejarán de hacerse automáticamente.')) return;
+  if (D.token) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(D.token), { method: 'POST' }).catch(() => {});
+  D.token = null; D.exp = 0; D.connected = false; await driveSave(); refresh(); toast('Drive desconectado');
+}
+
+function runDriveResume() {
+  const r = driveResume; driveResume = null;
+  if (!r) return;
+  if (r.err === 'state') { toast('La conexión con Google se abrió fuera de la app. Inténtalo de nuevo desde la app.'); return; }
+  if (r.err) { toast(r.err === 'access_denied' ? 'No se dio permiso a Google Drive.' : 'No se pudo conectar con Google: ' + r.err); return; }
+  if (r.action === 'restore') driveRestoreSheet();
+  else driveBackup(false).then(ok => { if (ok && r.action === 'connect') toast('Drive conectado. Tus datos se respaldarán solos.'); });
+}
 
 /* ---------- Arranque ---------- */
 async function boot() {
@@ -1346,6 +1498,8 @@ async function boot() {
   S = await Store.get('state') || blank();
   S.settings = { ...blank().settings, ...(S.settings || {}) };
   S.recurring = S.recurring || []; S.budgets = S.budgets || {}; S.lessons = S.lessons || []; S.debts = S.debts || []; S.goals = S.goals || [];
+  D = { ...D, ...(await Store.get('drive') || {}) };
+  driveResume = driveCatch(); if (driveResume) await driveSave();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if (!S.settings.lock) showSetup(); else showUnlock();

@@ -1,6 +1,6 @@
 /* Service worker: con internet siempre usa la versión más reciente; sin internet, la guardada.
    Al publicar una versión nueva, cambia VERSION aquí y en index.html. */
-const VERSION = '3.0.1';
+const VERSION = '4.0.0';
 const CACHE = 'fp-' + VERSION;
 const ASSETS = ['./', './index.html', './styles.css?v=' + VERSION, './parser.js?v=' + VERSION, './app.js?v=' + VERSION,
   './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
@@ -13,6 +13,9 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  const u = new URL(e.request.url);
+  // Solo archivos de la app y fuentes; nunca Google Drive ni inicio de sesión.
+  if (u.origin !== self.location.origin && !/^fonts\.(googleapis|gstatic)\.com$/.test(u.hostname)) return;
   e.respondWith(
     fetch(e.request, { cache: 'no-cache' }).then(r => {
       if (r && (r.ok || r.type === 'opaque')) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
