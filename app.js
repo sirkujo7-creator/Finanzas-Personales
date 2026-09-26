@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 
-const VERSION = '3.0.0 (fase 3)';
+const VERSION = '3.0.1 (fase 3)';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const pad2 = n => String(n).padStart(2, '0');
