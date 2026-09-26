@@ -177,8 +177,8 @@
     note = note.replace(/\b(hoy|ayer|antier|anteayer|antes de ayer|hace\s+\d+\s+d[ií]as?|(el\s+)?(lunes|martes|mi[ée]rcoles|jueves|viernes|s[áa]bado|domingo))\b/gi, ' ');
     note = note.replace(/\d[\d.,]*(\s*(millones|millón|millon|palos?|mil|k|lucas?|barras?)\b)?/gi, (m, _a, _b, off, str) => /[A-Za-zÁÉÍÓÚáéíóúñÑ]/.test(str[off - 1] || '') ? m : ' ');
     for (const h of accs) note = note.replace(new RegExp(h.a.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ');
-    note = note.replace(/\b(en|de|del|con|por|el|la|los|las|al|a|desde|hacia|para|pesos|pagu[ée]|gast[ée]|compr[ée]|efectivo|cash)\b/gi, ' ');
-    note = note.replace(/\s+/g, ' ').trim();
+    const FILL = new Set(['en', 'de', 'del', 'con', 'por', 'el', 'la', 'los', 'las', 'al', 'a', 'desde', 'hacia', 'para', 'pesos', 'pague', 'gaste', 'compre', 'efectivo', 'cash']);
+    note = note.split(/\s+/).filter(w => w && !FILL.has(norm(w).replace(/[^a-z0-9]/g, ''))).join(' ').trim();
     out.note = note ? note.charAt(0).toUpperCase() + note.slice(1) : '';
     return out;
   }

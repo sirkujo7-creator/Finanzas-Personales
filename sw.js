@@ -1,6 +1,6 @@
 /* Service worker: con internet siempre usa la versión más reciente; sin internet, la guardada.
    Al publicar una versión nueva, cambia VERSION aquí y en index.html. */
-const VERSION = '4.1.0';
+const VERSION = '5.0.0';
 const CACHE = 'fp-' + VERSION;
 const ASSETS = ['./', './index.html', './styles.css?v=' + VERSION, './parser.js?v=' + VERSION, './app.js?v=' + VERSION,
   './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
