@@ -19,7 +19,10 @@ button{font-family:inherit;cursor:pointer}
 
 main{max-width:560px;margin:0 auto;
   padding:calc(env(safe-area-inset-top,0px) + 14px) 20px calc(env(safe-area-inset-bottom,0px) + 112px)}
-.top h1{font:600 30px/1.1 var(--serif);margin:10px 0 18px;letter-spacing:-.01em}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 18px}
+.top h1{font:600 30px/1.1 var(--serif);margin:0;letter-spacing:-.01em}
+.gear{display:grid;place-items:center;color:var(--muted)}
+.gear.on{color:var(--paper);background:var(--ink);border-color:var(--ink)}
 
 /* Hero: la pregunta que decide el día */
 .hero{padding:2px 0 22px;margin-bottom:20px;border-bottom:1px solid var(--line)}
@@ -101,7 +104,8 @@ input:focus,select:focus{outline:2px solid var(--ocre);outline-offset:1px}
 
 /* Movimientos */
 .month{display:flex;align-items:center;justify-content:space-between;margin:0 0 6px}
-.month strong{font:600 18px var(--serif);text-transform:capitalize}
+.month strong{font:600 18px var(--serif);display:inline-block}
+.month strong::first-letter{text-transform:uppercase}
 .iconbtn{appearance:none;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);width:42px;height:42px;border-radius:50%;font-size:20px;line-height:1}
 .day{font-size:14px;font-weight:600;color:var(--muted);margin:18px 0 2px}
 .day:first-letter{text-transform:uppercase}
@@ -129,3 +133,24 @@ input:focus,select:focus{outline:2px solid var(--ocre);outline-offset:1px}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
 @media (prefers-reduced-motion:reduce){.sheet-body{animation:none}.toast{transition:none}}
+
+/* Fase 2: alertas y semáforo */
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none;background:var(--line)}
+.dot.ok{background:var(--pos)} .dot.warn{background:var(--ocre)} .dot.bad{background:var(--neg)}
+.ind{display:flex;align-items:center;gap:8px}
+.alert{display:flex;gap:10px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--line);font-size:15px}
+.alert:last-of-type{border-bottom:0}
+.alert .dot{transform:translateY(-1px)}
+.tx .bar{margin-top:8px}
+
+/* Fase 3: subsecciones, comparador y metas */
+.seg.four{grid-template-columns:repeat(4,1fr);margin-bottom:20px}
+.seg.four button{font-size:13px;padding:9px 2px}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opt{background:var(--surface);border:1.5px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:3px}
+.opt.best{border-color:var(--pos)}
+.opt .s{font-size:13px;color:var(--muted)}
+.opt .k{font:600 20px/1.2 var(--serif);margin-top:6px}
+.goal{padding:14px 0;border-bottom:1px solid var(--line)}
+.goal:last-of-type{border-bottom:0}
+.alert.ok{color:inherit}

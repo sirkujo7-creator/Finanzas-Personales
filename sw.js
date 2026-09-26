@@ -1,5 +1,5 @@
 /* Service worker: permite usar la app sin internet. Cambia CACHE en cada versión nueva. */
-const CACHE = 'fp-v1';
+const CACHE = 'fp-v3';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './parser.js', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
