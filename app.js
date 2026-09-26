@@ -1366,7 +1366,7 @@ $('#fileIn').addEventListener('change', async e => {
    Permiso drive.file: la app solo ve los archivos que ella misma crea. */
 const G_CLIENT = '1018549599126-2qabmmv1vrhuqis01e6met5pskn4h1dc.apps.googleusercontent.com';
 const G_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const G_REDIRECT = location.hostname.endsWith('github.io') ? 'https://sirkujo7-creator.github.io/finanzas-personales/' : location.origin + location.pathname;
+const G_REDIRECT = location.hostname.endsWith('github.io') ? 'https://sirkujo7-creator.github.io/Finanzas-Personales/' : location.origin + location.pathname;
 const G_API = 'https://www.googleapis.com/drive/v3/files';
 const G_UP = 'https://www.googleapis.com/upload/drive/v3/files';
 let D = { connected: false, token: null, exp: 0, folderId: null, fileId: null, monthly: {}, last: null, dirty: false, pending: null, pendingState: null };
