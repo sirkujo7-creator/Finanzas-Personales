@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 
-const VERSION = '4.0.0 (fase 4: Drive)';
+const VERSION = '4.1.0 (fase 4: Drive e IA)';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const pad2 = n => String(n).padStart(2, '0');
@@ -439,6 +439,7 @@ function enterApp(to) {
   const n = runRecurring();
   if (n) { save(); toast(`${n} movimiento${n > 1 ? 's' : ''} fijo${n > 1 ? 's' : ''} registrado${n > 1 ? 's' : ''}`); }
   go(to || tab);
+  if (aiReady() && (!AI.lastCheck || (Date.now() - new Date(AI.lastCheck)) / 864e5 >= 15)) setTimeout(() => aiCheckIndicators(true), 2500);
   if (driveResume) setTimeout(runDriveResume, 350);
   else if (D.connected && D.dirty) scheduleDrive();
 }
@@ -471,6 +472,7 @@ function renderInicio() {
   let notices = '';
   const lb = S.settings.lastBackup;
   const daysSince = lb ? Math.floor((Date.now() - parseISO(lb)) / 864e5) : null;
+  if (AI.proposal) notices += `<div class="notice"><span>Hay indicadores económicos nuevos para revisar.</span><button class="btn sm" id="indRev">Revisar</button></div>`;
   const driveAge = D.last ? (Date.now() - new Date(D.last)) / 864e5 : null;
   if (D.connected && D.dirty && !driveOk() && (driveAge === null || driveAge >= 1))
     notices += `<div class="notice"><span>Tienes cambios sin respaldar en Drive. Google pide confirmar tu sesión.</span><button class="btn sm" id="bk">Respaldar</button></div>`;
@@ -521,6 +523,7 @@ function renderInicio() {
     </section>`;
   if ($('#bk')) $('#bk').onclick = () => D.connected ? driveBackup(false) : driveAuth('connect');
   if ($('#moreAl')) $('#moreAl').onclick = () => go('plan');
+  if ($('#indRev')) $('#indRev').onclick = indicatorsSheet;
 }
 
 /* ---------- Movimientos ---------- */
@@ -747,11 +750,16 @@ const alertHTML = al => `<div class="alert ${al.lv}"><span class="dot ${al.lv}">
 
 function planResumen(v) {
   const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const askBox = `<section class="block ask">
+      <h2>Pregúntale a tu asesor</h2>
+      <p class="small muted" style="margin:0 0 10px">${aiReady() ? 'Responde con tus datos resumidos, usando Gemini.' : 'Conecta Gemini en Ajustes para usar esta función.'}</p>
+      <div class="askrow"><input id="askQ" placeholder="Ej: ¿Me alcanza para un casco de 800 mil en diciembre?" autocomplete="off" enterkeyhint="send"><button class="btn" id="askGo">Preguntar</button></div>
+    </section>`;
   const h = health(), al = alerts(), rows = budgetRows(y, m);
   const totalBudget = Object.values(S.budgets).reduce((s, x) => s + (x || 0), 0);
   const unbudgetedFixed = monthlyFixed('gasto', r => !S.budgets[r.category]);
 
-  v.innerHTML = `
+  v.innerHTML = askBox + `
     <section class="block">
       <h2>Salud financiera</h2>
       ${h.list.map(i => `<div class="row"><span class="l"><span class="ind"><span class="dot ${i.lv}" aria-label="${LV_LABEL[i.lv]}"></span>${i.name}</span><span class="s">${i.why}</span></span><span class="amt">${i.val}</span></div>`).join('')}
@@ -781,6 +789,9 @@ function planResumen(v) {
       <button class="btn ghost wide" id="addLes" style="margin-top:12px">Agregar lección</button>
     </section>`;
 
+  const ask = () => { const q = $('#askQ').value.trim(); if (!q) { $('#askQ').focus(); return; }
+    aiSheet('Tu asesor', `Pregunta del usuario: "${q}". Responde a esa pregunta con base en sus datos.`); };
+  $('#askGo').onclick = ask; $('#askQ').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); ask(); } });
   $$('[data-bud]').forEach(el => el.onclick = () => budgetSheet());
   $$('[data-les]').forEach(el => el.onclick = () => lessonSheet(S.lessons.find(l => l.id === el.dataset.les)));
   $('#editBud').onclick = () => budgetSheet();
@@ -1176,7 +1187,9 @@ function planInforme(v) {
     <section class="block"><h2>Banderas rojas</h2>${r.red.length ? list(r.red, 'bad') : '<p class="small muted" style="margin:0">Ninguna. Buen mes.</p>'}</section>
     ${r.green.length ? `<section class="block"><h2>Lo que salió bien</h2>${list(r.green, 'ok')}</section>` : ''}
     ${r.todo.length ? `<section class="block"><h2>Decisiones para el próximo mes</h2>${list(r.todo, 'warn')}</section>` : ''}
+    <button class="btn wide" id="aiRep" style="margin:4px 0 16px">Análisis del mes con IA</button>
     <p class="small muted">Inflación usada: ${pctFmt(ipc(), 2)} anual${S.settings.ipcDate ? ` (${esc(S.settings.ipcDate)})` : ''}. Puedes actualizarla en Ajustes.</p>`;
+  $('#aiRep').onclick = () => aiSheet('Análisis de ' + monthFmt.format(new Date(y, m, 1)), `Analiza el mes de ${monthFmt.format(new Date(y, m, 1))}. Estas son las banderas rojas que detectó la app: ${JSON.stringify(r.red)}. Lo que salió bien: ${JSON.stringify(r.green)}. Explica en qué se fue el dinero, qué patrón preocupa más y da 3 acciones concretas para el próximo mes con cifras.`);
   $('#rPrev').onclick = () => { repMonth.m--; if (repMonth.m < 0) { repMonth.m = 11; repMonth.y--; } planInforme(v); };
   $('#rNext').onclick = () => { if (isNow) return; repMonth.m++; if (repMonth.m > 11) { repMonth.m = 0; repMonth.y++; } planInforme(v); };
 }
@@ -1288,14 +1301,20 @@ function renderAjustes() {
       <div class="actions"><button class="btn ghost" id="exp">Exportar archivo</button><button class="btn ghost" id="imp">Importar archivo</button></div>
     </section>
     <section class="block">
+      <h2>Inteligencia artificial</h2>
+      ${aiReady() ? `<p class="small muted" style="margin:0 0 12px">Gemini conectado (modelo ${esc(AI.model)}). A la IA solo se envían resúmenes: nunca tus movimientos uno por uno ni los nombres de tus cuentas.</p>
+      <div class="actions"><button class="btn ghost" id="aKeyBtn">Cambiar clave</button><button class="btn ghost" id="aOff">Quitar clave</button></div>`
+      : `<p class="small muted" style="margin:0 0 12px">Conecta Gemini para análisis mensuales, preguntas libres y la actualización de indicadores.</p><button class="btn wide" id="aKeyBtn">Conectar Gemini</button>`}
+    </section>
+    <section class="block">
       <h2>Indicadores económicos</h2>
-      <p class="small muted" style="margin:0 0 12px">Se usan en metas, informes y simulador de crédito. En la fase 4 se actualizarán solos, con tu confirmación.</p>
+      <p class="small muted" style="margin:0 0 12px">Se usan en metas, informes y simulador de crédito. ${aiReady() ? `Con Gemini se revisan cada 15 días y te pido confirmar los cambios.${AI.lastCheck ? ' Última revisión: ' + shortFmt.format(new Date(AI.lastCheck)) + '.' : ''}` : 'Con Gemini conectado se revisan solos.'}</p>
       <div class="grid2">
         <label class="f"><span>Inflación anual (IPC) %</span><input id="sIpc" inputmode="decimal" value="${S.settings.ipc != null ? String(S.settings.ipc).replace('.', ',') : ''}"></label>
         <label class="f"><span>Tasa de usura E.A. %</span><input id="sUsu" inputmode="decimal" value="${S.settings.usura != null ? String(S.settings.usura).replace('.', ',') : ''}" placeholder="Opcional"></label>
       </div>
-      <p class="small muted" style="margin:-4px 0 10px">IPC: ${esc(S.settings.ipcDate || 'sin fuente')}. La usura la publica la Superfinanciera cada mes.</p>
-      <button class="btn ghost wide" id="sEco">Guardar indicadores</button>
+      <p class="small muted" style="margin:-4px 0 10px">IPC: ${esc(S.settings.ipcDate || 'sin fuente')}. Usura: ${esc(S.settings.usuraDate || 'la publica la Superfinanciera cada mes')}.</p>
+      <div class="actions"><button class="btn ghost" id="sEco">Guardar</button>${aiReady() ? '<button class="btn" id="sAi">Buscar vigentes</button>' : ''}</div>
     </section>
     <section class="block">
       <h2>Seguridad</h2>
@@ -1309,6 +1328,9 @@ function renderAjustes() {
     <p class="small muted">Finanzas Personales ${VERSION}</p>`;
   $('#exp').onclick = exportData;
   if ($('#dCon')) $('#dCon').onclick = () => driveAuth('connect');
+  $('#aKeyBtn').onclick = aiKeySheet;
+  if ($('#aOff')) $('#aOff').onclick = async () => { if (!confirm('¿Quitar la clave de Gemini de este celular?')) return; AI = { key: null, model: null, lastCheck: null, proposal: null }; await aiSave(); refresh(); toast('Clave eliminada'); };
+  if ($('#sAi')) $('#sAi').onclick = () => aiCheckIndicators(false);
   if ($('#dNow')) $('#dNow').onclick = () => driveBackup(false);
   if ($('#dOff')) $('#dOff').onclick = driveDisconnect;
   $('#dRes').onclick = driveRestoreSheet;
@@ -1366,7 +1388,7 @@ $('#fileIn').addEventListener('change', async e => {
    Permiso drive.file: la app solo ve los archivos que ella misma crea. */
 const G_CLIENT = '1018549599126-2qabmmv1vrhuqis01e6met5pskn4h1dc.apps.googleusercontent.com';
 const G_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const G_REDIRECT = location.hostname.endsWith('github.io') ? 'https://sirkujo7-creator.github.io/Finanzas-Personales/' : location.origin + location.pathname;
+const G_REDIRECT = location.hostname.endsWith('github.io') ? 'https://sirkujo7-creator.github.io/finanzas-personales/' : location.origin + location.pathname;
 const G_API = 'https://www.googleapis.com/drive/v3/files';
 const G_UP = 'https://www.googleapis.com/upload/drive/v3/files';
 let D = { connected: false, token: null, exp: 0, folderId: null, fileId: null, monthly: {}, last: null, dirty: false, pending: null, pendingState: null };
@@ -1492,6 +1514,194 @@ function runDriveResume() {
   else driveBackup(false).then(ok => { if (ok && r.action === 'connect') toast('Drive conectado. Tus datos se respaldarán solos.'); });
 }
 
+/* ---------- IA con Gemini (fase 4b) ----------
+   La clave se guarda solo en este dispositivo (fuera de los respaldos).
+   A la IA solo se envían resúmenes: nunca movimientos individuales ni nombres de cuentas. */
+const AI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+let AI = { key: null, model: null, lastCheck: null, proposal: null };
+const aiSave = () => Store.set('ai', AI).catch(() => {});
+const aiReady = () => !!(AI.key && AI.model);
+
+async function aiFetch(path, body) {
+  const r = await fetch(AI_BASE + path, { method: body ? 'POST' : 'GET', headers: { 'x-goog-api-key': AI.key, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) {
+    let msg = ''; try { msg = (await r.json()).error.message || ''; } catch (e) {}
+    const e = new Error(msg); e.status = r.status; throw e;
+  }
+  return r.json();
+}
+function aiError(e) {
+  if (e.status === 429) return 'Alcanzaste el límite gratuito de Gemini por ahora. Intenta en unos minutos.';
+  if (e.status === 400 && /API key/i.test(e.message)) return 'La clave de Gemini no es válida.';
+  if (e.status === 403) return 'Gemini rechazó la clave. Revisa sus restricciones en Google Cloud.';
+  if (!e.status) return 'Sin conexión con Gemini. Revisa tu internet.';
+  return 'Gemini respondió con un error (' + e.status + ').';
+}
+
+async function aiPickModel() {
+  const list = [];
+  let token = '';
+  do {
+    const j = await aiFetch('/models?pageSize=200' + (token ? '&pageToken=' + token : ''));
+    list.push(...(j.models || [])); token = j.nextPageToken || '';
+  } while (token);
+  const ver = n => { const m = n.match(/gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0; };
+  const cands = list.filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map(m => m.name.replace('models/', ''))
+    .filter(n => /^gemini-/.test(n) && /flash/.test(n) && !/(image|tts|audio|live|embed|vision|exp|computer|robotics|native)/.test(n))
+    .sort((a, b) => (/preview/.test(a) - /preview/.test(b)) || (/lite/.test(a) - /lite/.test(b)) || ver(b) - ver(a) || a.length - b.length);
+  for (const n of cands.slice(0, 8)) {
+    try { await aiFetch(`/models/${n}:generateContent`, { contents: [{ parts: [{ text: 'Responde solo: OK' }] }] }); return n; }
+    catch (e) { if (e.status === 400 && /API key/i.test(e.message)) throw e; if (e.status === 429) throw e; }
+  }
+  throw Object.assign(new Error('Ningún modelo respondió'), { status: 404 });
+}
+
+async function aiAsk(prompt, opts = {}) {
+  const body = {
+    systemInstruction: { parts: [{ text: opts.system || AI_SYSTEM }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: opts.temp ?? 0.4 }
+  };
+  if (opts.search) body.tools = [{ google_search: {} }];
+  let j;
+  try { j = await aiFetch(`/models/${AI.model}:generateContent`, body); }
+  catch (e) {
+    if (e.status === 404) { AI.model = await aiPickModel(); await aiSave(); j = await aiFetch(`/models/${AI.model}:generateContent`, body); }
+    else throw e;
+  }
+  const c = (j.candidates || [])[0] || {};
+  const text = ((c.content || {}).parts || []).map(p => p.text || '').join('').trim();
+  const sources = (((c.groundingMetadata || {}).groundingChunks) || []).map(g => g.web).filter(Boolean);
+  return { text, sources };
+}
+
+const AI_SYSTEM = `Eres el asesor financiero de una app de finanzas personales para una persona en Colombia.
+Respondes en español, claro y directo, en máximo 200 palabras.
+Te basas SOLO en los datos del resumen que recibes; si falta información, dilo en vez de inventar.
+Das recomendaciones concretas con cifras en pesos colombianos (formato $1.234.000).
+Priorizas: liquidez y fondo de emergencia, pagar deudas caras, evitar créditos por encima de la usura, ahorrar al menos 20%.
+No recomiendas productos financieros ni entidades específicas. No usas tablas. Puedes usar viñetas cortas y **negritas**.`;
+
+function aiContext() {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const months = [];
+  for (let i = 3; i >= 0; i--) {
+    const d = new Date(y, m - i, 1), st = monthStats(d.getFullYear(), d.getMonth());
+    if (!st.inc && !st.exp && i) continue;
+    months.push({ mes: monthFmt.format(d) + (i ? '' : ' (en curso, día ' + now.getDate() + ')'), ingresos: Math.round(st.inc), ingresos_fijos: Math.round(st.incFix), ingresos_variables: Math.round(st.incVar), gastos: Math.round(st.exp),
+      gastos_por_categoria: Object.fromEntries(Object.entries(st.byCat).map(([k, v]) => [k, Math.round(v)])) });
+  }
+  const t = totals(), dl = daily(), h = health();
+  return {
+    fecha: todayISO(),
+    dinero_disponible: Math.round(t.liquid), deuda_tarjetas: Math.round(t.debt), apartado_en_metas: Math.round(goalsReserved()),
+    puede_gastar_por_dia_hoy: Math.round(dl.perDay), dias_restantes_mes: dl.daysLeft,
+    ingreso_fijo_mensual: Math.round(monthlyFixed('ingreso')), gastos_fijos_mensuales: Math.round(monthlyFixed('gasto')),
+    meses: months,
+    limites_presupuesto: S.budgets,
+    deudas: S.debts.map(d => ({ nombre: d.name, saldo: Math.round(debtBalance(d)), tasa_EA: d.rate, cuota_minima: d.min })),
+    metas: S.goals.map(g => { const p = goalPlan(g); return { nombre: g.name, objetivo_ajustado_inflacion: Math.round(p.target), apartado: g.saved, fecha: g.date, necesita_por_mes: Math.round(p.perMonth) }; }),
+    lecciones: S.lessons.map(l => l.text),
+    indicadores_salud: h.list.map(i => ({ [i.name]: i.val, estado: LV_LABEL[i.lv] })),
+    alertas_actuales: alerts().map(a => a.t),
+    inflacion_anual: ipc(), tasa_usura_EA: S.settings.usura
+  };
+}
+
+function aiContextText() {
+  let t = JSON.stringify(aiContext(), null, 1);
+  [...S.accounts].sort((a, b) => b.name.length - a.name.length).forEach(a => {
+    if (a.name.trim().length < 2) return;
+    t = t.split(a.name).join(ACC_TYPES[a.type].toLowerCase());
+  });
+  return t;
+}
+
+function mdLite(text) {
+  const lines = esc(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').split('\n');
+  let html = '', inList = false;
+  for (const raw of lines) {
+    const l = raw.trim();
+    const li = l.match(/^([-*•]|\d+[.)])\s+(.*)/);
+    if (li) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${li[2]}</li>`; continue; }
+    if (inList) { html += '</ul>'; inList = false; }
+    if (l) html += `<p>${l.replace(/^#+\s*/, '')}</p>`;
+  }
+  return html + (inList ? '</ul>' : '');
+}
+
+function aiSheet(title, prompt, opts = {}) {
+  if (!aiReady()) { toast('Primero agrega tu clave de Gemini en Ajustes.'); go('ajustes'); return; }
+  const ctx = aiContextText();
+  openSheet(`<h2>${esc(title)}</h2><div id="aiOut" class="ai-out"><p class="muted">Pensando…</p></div>
+    <details class="small muted" style="margin:10px 0"><summary>Qué datos se enviaron a Gemini</summary><pre class="ai-ctx">${esc(ctx)}</pre></details>
+    <p class="small muted">Respuesta generada por IA con tus datos resumidos. No reemplaza la asesoría de un profesional.</p>
+    <div class="actions"><button class="btn" id="cancel">Cerrar</button></div>`);
+  $('#cancel').onclick = closeSheet;
+  aiAsk(`${prompt}\n\nDATOS DEL USUARIO (JSON):\n${ctx}`, opts)
+    .then(r => { if ($('#aiOut')) $('#aiOut').innerHTML = mdLite(r.text || 'Gemini no devolvió respuesta.'); })
+    .catch(e => { if ($('#aiOut')) $('#aiOut').innerHTML = `<p class="neg">${esc(aiError(e))}</p>`; });
+}
+
+/* --- Indicadores con búsqueda web y confirmación --- */
+async function aiCheckIndicators(quiet) {
+  if (!aiReady()) { if (!quiet) toast('Primero agrega tu clave de Gemini.'); return; }
+  if (!quiet) openSheet('<h2>Indicadores vigentes</h2><p class="hint">Buscando los datos oficiales más recientes…</p>');
+  try {
+    const hoy = new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' });
+    const r = await aiAsk(`Hoy es ${hoy}. Busca en fuentes oficiales o medios confiables de Colombia:
+1) La inflación anual (variación anual del IPC) más reciente publicada por el DANE, y el mes al que corresponde.
+2) La tasa de usura vigente hoy para crédito de consumo y ordinario (efectiva anual), certificada por la Superintendencia Financiera, y su periodo de vigencia.
+Responde SOLO con un JSON así, sin texto adicional: {"ipc": 6.24, "ipc_periodo": "agosto 2026", "usura": 25.5, "usura_periodo": "septiembre 2026"}. Usa números con punto decimal. Si no encuentras un dato con certeza, pon null.`,
+      { search: true, temp: 0, system: 'Eres un asistente que busca datos económicos oficiales de Colombia y responde solo en JSON válido.' });
+    const m = r.text.match(/\{[\s\S]*\}/); if (!m) throw Object.assign(new Error('formato'), { status: 'fmt' });
+    const j = JSON.parse(m[0]);
+    const num = v => (typeof v === 'number' && isFinite(v) && v > -5 && v < 100) ? v : null;
+    const p = { ipc: num(j.ipc), ipcDate: j.ipc_periodo || '', usura: num(j.usura), usuraDate: j.usura_periodo || '', sources: r.sources.slice(0, 4), at: new Date().toISOString() };
+    AI.lastCheck = p.at;
+    const changed = (p.ipc != null && Math.abs(p.ipc - (S.settings.ipc ?? -1)) > 0.001) || (p.usura != null && Math.abs(p.usura - (S.settings.usura ?? -1)) > 0.001);
+    AI.proposal = changed ? p : null; await aiSave();
+    if (!quiet) { if (changed) indicatorsSheet(); else { openSheet(`<h2>Indicadores vigentes</h2><p class="hint">Tus indicadores ya están al día: IPC ${pctFmt(S.settings.ipc, 2)}${S.settings.usura ? `, usura ${pctFmt(S.settings.usura, 2)} E.A.` : ''}.</p><div class="actions"><button class="btn" id="cancel">Cerrar</button></div>`); $('#cancel').onclick = closeSheet; } }
+    else if (changed && tab === 'inicio') refresh();
+  } catch (e) {
+    if (!quiet) { closeSheet(); toast(e.status === 'fmt' ? 'No pude leer la respuesta de Gemini. Intenta de nuevo.' : aiError(e)); }
+  }
+}
+
+function indicatorsSheet() {
+  const p = AI.proposal; if (!p) return;
+  const row = (id, label, cur, nv, per) => nv == null ? '' : `<label class="check"><input type="checkbox" id="${id}" checked> ${label}: ${cur != null ? pctFmt(cur, 2) : 'sin dato'} → <b>${pctFmt(nv, 2)}</b> <span class="muted small">(${esc(per)})</span></label>`;
+  openSheet(`<h2>Actualizar indicadores</h2>
+    <p class="hint">Gemini encontró estos valores. Verifícalos antes de aceptar: nada cambia sin tu confirmación.</p>
+    ${row('pIpc', 'Inflación anual', S.settings.ipc, p.ipc, p.ipcDate)}
+    ${row('pUsu', 'Usura E.A.', S.settings.usura, p.usura, p.usuraDate)}
+    ${p.sources.length ? `<p class="small muted" style="margin:6px 0 4px">Fuentes consultadas:</p>${p.sources.map(s => `<p class="small" style="margin:0 0 4px"><a href="${esc(s.uri)}" target="_blank" rel="noopener">${esc(s.title || 'Fuente')}</a></p>`).join('')}` : ''}
+    <div class="actions" style="margin-top:12px"><button class="btn ghost" id="cancel">Descartar</button><button class="btn" id="save">Aplicar</button></div>`);
+  $('#cancel').onclick = async () => { AI.proposal = null; await aiSave(); closeSheet(); refresh(); };
+  $('#save').onclick = async () => {
+    if ($('#pIpc') && $('#pIpc').checked) { S.settings.ipc = p.ipc; S.settings.ipcDate = p.ipcDate + ', verificado con IA'; }
+    if ($('#pUsu') && $('#pUsu').checked) { S.settings.usura = p.usura; S.settings.usuraDate = p.usuraDate; }
+    AI.proposal = null; await aiSave(); await save(); closeSheet(); refresh(); toast('Indicadores actualizados');
+  };
+}
+
+function aiKeySheet() {
+  openSheet(`<h2>Conectar Gemini</h2>
+    <p class="hint">Pega tu clave de Google AI Studio. Se guarda solo en este celular: no va en los respaldos ni se comparte.</p>
+    <label class="f"><span>Clave de API</span><input id="aKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="AIza…"></label>
+    <div id="aMsg" class="small" style="min-height:1.3em;margin-bottom:8px"></div>
+    <div class="actions"><button class="btn ghost" id="cancel">Cancelar</button><button class="btn" id="save">Probar y guardar</button></div>`);
+  $('#cancel').onclick = closeSheet;
+  $('#save').onclick = async () => {
+    const k = $('#aKey').value.trim(); if (!k) return;
+    $('#save').disabled = true; $('#aMsg').innerHTML = '<span class="muted">Probando la clave y eligiendo el mejor modelo disponible…</span>';
+    const old = { ...AI }; AI.key = k;
+    try { AI.model = await aiPickModel(); await aiSave(); closeSheet(); refresh(); toast('Gemini conectado'); aiCheckIndicators(true); }
+    catch (e) { AI = old; $('#save').disabled = false; $('#aMsg').innerHTML = `<span class="neg">${esc(e.status === 404 ? 'Tu clave funciona, pero ningún modelo respondió. Intenta más tarde.' : aiError(e))}</span>`; }
+  };
+}
+
 /* ---------- Arranque ---------- */
 async function boot() {
   await Store.open();
@@ -1499,6 +1709,7 @@ async function boot() {
   S.settings = { ...blank().settings, ...(S.settings || {}) };
   S.recurring = S.recurring || []; S.budgets = S.budgets || {}; S.lessons = S.lessons || []; S.debts = S.debts || []; S.goals = S.goals || [];
   D = { ...D, ...(await Store.get('drive') || {}) };
+  AI = { ...AI, ...(await Store.get('ai') || {}) };
   driveResume = driveCatch(); if (driveResume) await driveSave();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

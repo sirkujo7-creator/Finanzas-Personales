@@ -154,3 +154,15 @@ input:focus,select:focus{outline:2px solid var(--ocre);outline-offset:1px}
 .goal{padding:14px 0;border-bottom:1px solid var(--line)}
 .goal:last-of-type{border-bottom:0}
 .alert.ok{color:inherit}
+
+/* Fase 4b: asesor IA */
+.askrow{display:flex;gap:8px}
+.askrow input{flex:1;min-width:0}
+.askrow .btn{flex:none}
+.ai-out{font-size:16px;line-height:1.55}
+.ai-out p{margin:0 0 10px}
+.ai-out ul{margin:0 0 10px;padding-left:20px}
+.ai-out li{margin-bottom:6px}
+.ai-ctx{white-space:pre-wrap;word-break:break-word;font-size:11px;max-height:220px;overflow:auto;background:var(--surface);padding:10px;border-radius:10px}
+details summary{cursor:pointer}
+.sheet-body a{color:var(--ocre)}
